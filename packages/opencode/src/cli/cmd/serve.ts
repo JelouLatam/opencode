@@ -18,6 +18,11 @@ export const ServeCommand = cmd({
         type: "string",
         describe: "hostname to listen on",
         default: "127.0.0.1",
+      })
+      .option("cors-origins", {
+        alias: ["c"],
+        type: "array",
+        describe: "CORS allowed origins",
       }),
   describe: "starts a headless opencode server",
   handler: async (args) => {
@@ -30,10 +35,12 @@ export const ServeCommand = cmd({
 
       const hostname = args.hostname
       const port = args.port
+      const corsOrigins = (args["cors-origins"] ?? []).map(String)
 
       const server = Server.listen({
         port,
         hostname,
+        corsOrigins,
       })
 
       console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
