@@ -48,7 +48,7 @@ export namespace Server {
     Connected: Bus.event("server.connected", z.object({})),
   }
 
-  function app() {
+  function app(corsOrigins?: string[]) {
     const app = new Hono()
 
     const result = app
@@ -61,6 +61,25 @@ export namespace Server {
         return c.json(new NamedError.Unknown({ message: err.toString() }).toObject(), {
           status: 400,
         })
+      })
+      .use(async (c, next) => {
+        // CORS headers
+        if (corsOrigins && corsOrigins.length > 0) {
+          const origin = c.req.header('origin')
+          if (origin && corsOrigins.includes(origin)) {
+            c.header('Access-Control-Allow-Origin', origin)
+          } else if (corsOrigins.includes('*')) {
+            c.header('Access-Control-Allow-Origin', '*')
+          }
+          c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+          c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+          c.header('Access-Control-Allow-Credentials', 'true')
+          
+          if (c.req.method === 'OPTIONS') {
+            return c.text('', 200)
+          }
+        }
+        await next()
       })
       .use(async (c, next) => {
         const skipLogging = c.req.path === "/log"
@@ -1039,12 +1058,12 @@ export namespace Server {
     return result
   }
 
-  export function listen(opts: { port: number; hostname: string }) {
+  export function listen(opts: { port: number; hostname: string; corsOrigins?: string[] }) {
     const server = Bun.serve({
       port: opts.port,
       hostname: opts.hostname,
       idleTimeout: 0,
-      fetch: app().fetch,
+      fetch: app(opts.corsOrigins).fetch,
     })
     return server
   }

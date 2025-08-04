@@ -10,13 +10,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `bun run typecheck` - Run TypeScript type checking across all packages
 
 ### Testing
-- `bun test` - Run tests (using Bun test runner)
-- Tests are located in `packages/opencode/test/` and use Bun's built-in test framework
+- `bun test` - Run tests using Bun's built-in test framework
+- `bun test packages/opencode/test/tool/tool.test.ts` - Run specific test file
+- Tests are located in `packages/opencode/test/` and use snapshot testing for tool outputs
+- Test fixtures are in `packages/opencode/test/fixtures/`
 
 ### Go TUI Development
 - `cd packages/tui && go run cmd/opencode/main.go` - Run the Go TUI client
 - Requires Go 1.24.x
 - The TUI is a separate Go application that communicates with the TypeScript server
+
+### SDK Development
+- **Go SDK**: Located in `packages/sdk/go/` with standard Go tooling
+- **JavaScript SDK**: Located in `packages/sdk/js/` with TypeScript support
+- API client generation uses Stainless SDK generator
 
 ## Architecture Overview
 
@@ -83,5 +90,31 @@ This is a client-server architecture AI coding agent with the following key comp
 ### Testing Approach
 - Bun test framework for TypeScript code
 - Test files in `packages/opencode/test/`
-- Snapshot testing for tool outputs
+- Snapshot testing for tool outputs in `__snapshots__/` directories
 - Integration tests for CLI commands
+- Go tests use standard `go test` tooling in TUI and SDK packages
+
+## Configuration and Runtime
+
+### Configuration Management
+- Global config file: `opencode.json` in project root
+- Supports custom model providers (OpenRouter, HuggingFace, local models)
+- MCP (Model Context Protocol) server configurations
+- Provider-specific authentication via `src/auth/`
+
+### Package Management
+- Uses Bun with exact versions (`bunfig.toml` sets `exact = true`)
+- Workspace catalog for shared dependencies in root `package.json`
+- Prettier config: `semi: false, printWidth: 120`
+
+## Build and Deployment
+
+### Binary Compilation
+- `bun build src/index.ts --compile --outfile ./opencode` - Compile to standalone binary
+- Docker deployment uses Bun for TypeScript execution or binary compilation
+- Platform-specific packaging for distribution
+
+### Distribution
+- npm package: `opencode-ai` 
+- Homebrew: `brew install sst/tap/opencode`
+- Install script: `curl -fsSL https://opencode.ai/install | bash`
