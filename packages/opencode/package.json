@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "version": "1.0.0-cors",
+  "version": "1.0.1-cors",
   "name": "opencode",
   "type": "module",
   "private": true,
