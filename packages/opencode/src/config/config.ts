@@ -1,5 +1,6 @@
 import { Log } from "../util/log"
 import path from "path"
+import os from "os"
 import { z } from "zod"
 import { App } from "../app/app"
 import { Filesystem } from "../util/filesystem"
@@ -23,13 +24,13 @@ export namespace Config {
     for (const file of ["opencode.jsonc", "opencode.json"]) {
       const found = await Filesystem.findUp(file, app.path.cwd, app.path.root)
       for (const resolved of found.toReversed()) {
-        result = mergeDeep(result, await load(resolved))
+        result = mergeDeep(result, await loadFile(resolved))
       }
     }
 
     // Override with custom config if provided
     if (Flag.OPENCODE_CONFIG) {
-      result = mergeDeep(result, await load(Flag.OPENCODE_CONFIG))
+      result = mergeDeep(result, await loadFile(Flag.OPENCODE_CONFIG))
       log.debug("loaded custom config", { path: Flag.OPENCODE_CONFIG })
     }
 
@@ -37,7 +38,7 @@ export namespace Config {
       if (value.type === "wellknown") {
         process.env[value.key] = value.token
         const wellknown = await fetch(`${key}/.well-known/opencode`).then((x) => x.json())
-        result = mergeDeep(result, await loadRaw(JSON.stringify(wellknown.config ?? {}), process.cwd()))
+        result = mergeDeep(result, await load(JSON.stringify(wellknown.config ?? {}), process.cwd()))
       }
     }
 
@@ -92,6 +93,14 @@ export namespace Config {
       throw new InvalidError({ path: item }, { cause: parsed.error })
     }
 
+    result.plugin = result.plugin || []
+    result.plugin.push(
+      ...[
+        ...(await Filesystem.globUp("plugin/*.ts", Global.Path.config, Global.Path.config)),
+        ...(await Filesystem.globUp(".opencode/plugin/*.ts", app.path.cwd, app.path.root)),
+      ].map((x) => "file://" + x),
+    )
+
     // Handle migration from autoshare to share field
     if (result.autoshare === true && !result.share) {
       result.share = "auto"
@@ -144,6 +153,7 @@ export namespace Config {
     .object({
       model: z.string().optional(),
       temperature: z.number().optional(),
+      top_p: z.number().optional(),
       prompt: z.string().optional(),
       tools: z.record(z.string(), z.boolean()).optional(),
       disable: z.boolean().optional(),
@@ -214,7 +224,7 @@ export namespace Config {
   })
   export type Layout = z.infer<typeof Layout>
 
-  export const Permission = z.union([z.literal("ask"), z.literal("allow")])
+  export const Permission = z.union([z.literal("ask"), z.literal("allow"), z.literal("deny")])
   export type Permission = z.infer<typeof Permission>
 
   export const Info = z
@@ -222,6 +232,7 @@ export namespace Config {
       $schema: z.string().optional().describe("JSON schema reference for configuration validation"),
       theme: z.string().optional().describe("Theme name to use for the interface"),
       keybinds: Keybinds.optional().describe("Custom keybind configurations"),
+      plugin: z.string().array().optional(),
       share: z
         .enum(["manual", "auto", "disabled"])
         .optional()
@@ -289,6 +300,23 @@ export namespace Config {
           }),
         )
         .optional(),
+      lsp: z
+        .record(
+          z.string(),
+          z.union([
+            z.object({
+              disabled: z.literal(true),
+            }),
+            z.object({
+              command: z.array(z.string()),
+              extensions: z.array(z.string()).optional(),
+              disabled: z.boolean().optional(),
+              env: z.record(z.string(), z.string()).optional(),
+              initialization: z.record(z.string(), z.any()).optional(),
+            }),
+          ]),
+        )
+        .optional(),
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: z
@@ -334,9 +362,9 @@ export namespace Config {
   export const global = lazy(async () => {
     let result: Info = pipe(
       {},
-      mergeDeep(await load(path.join(Global.Path.config, "config.json"))),
-      mergeDeep(await load(path.join(Global.Path.config, "opencode.json"))),
-      mergeDeep(await load(path.join(Global.Path.config, "opencode.jsonc"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "config.json"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.json"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.jsonc"))),
     )
 
     await import(path.join(Global.Path.config, "config"), {
@@ -357,25 +385,26 @@ export namespace Config {
     return result
   })
 
-  async function load(configPath: string): Promise<Info> {
-    let text = await Bun.file(configPath)
+  async function loadFile(filepath: string): Promise<Info> {
+    log.info("loading", { path: filepath })
+    let text = await Bun.file(filepath)
       .text()
       .catch((err) => {
         if (err.code === "ENOENT") return
-        throw new JsonError({ path: configPath }, { cause: err })
+        throw new JsonError({ path: filepath }, { cause: err })
       })
     if (!text) return {}
-    return loadRaw(text, configPath)
+    return load(text, filepath)
   }
 
-  async function loadRaw(text: string, configPath: string) {
+  async function load(text: string, filepath: string) {
     text = text.replace(/\{env:([^}]+)\}/g, (_, varName) => {
       return process.env[varName] || ""
     })
 
     const fileMatches = text.match(/\{file:[^}]+\}/g)
     if (fileMatches) {
-      const configDir = path.dirname(configPath)
+      const configDir = path.dirname(filepath)
       const lines = text.split("\n")
 
       for (const match of fileMatches) {
@@ -383,7 +412,10 @@ export namespace Config {
         if (lineIndex !== -1 && lines[lineIndex].trim().startsWith("//")) {
           continue // Skip if line is commented
         }
-        const filePath = match.replace(/^\{file:/, "").replace(/\}$/, "")
+        let filePath = match.replace(/^\{file:/, "").replace(/\}$/, "")
+        if (filePath.startsWith("~/")) {
+          filePath = path.join(os.homedir(), filePath.slice(2))
+        }
         const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(configDir, filePath)
         const fileContent = (await Bun.file(resolvedPath).text()).trim()
         // escape newlines/quotes, strip outer quotes
@@ -394,16 +426,24 @@ export namespace Config {
     const errors: JsoncParseError[] = []
     const data = parseJsonc(text, errors, { allowTrailingComma: true })
     if (errors.length) {
+      const lines = text.split("\n")
+      const errorDetails = errors
+        .map((e) => {
+          const beforeOffset = text.substring(0, e.offset).split("\n")
+          const line = beforeOffset.length
+          const column = beforeOffset[beforeOffset.length - 1].length + 1
+          const problemLine = lines[line - 1]
+
+          const error = `${printParseErrorCode(e.error)} at line ${line}, column ${column}`
+          if (!problemLine) return error
+
+          return `${error}\n   Line ${line}: ${problemLine}\n${"".padStart(column + 9)}^`
+        })
+        .join("\n")
+
       throw new JsonError({
-        path: configPath,
-        message: errors
-          .map((e) => {
-            const lines = text.substring(0, e.offset).split("\n")
-            const line = lines.length
-            const column = lines[lines.length - 1].length + 1
-            return `${printParseErrorCode(e.error)} at line ${line}, column ${column}`
-          })
-          .join("; "),
+        path: filepath,
+        message: `\n--- JSONC Input ---\n${text}\n--- Errors ---\n${errorDetails}\n--- End ---`,
       })
     }
 
@@ -411,11 +451,21 @@ export namespace Config {
     if (parsed.success) {
       if (!parsed.data.$schema) {
         parsed.data.$schema = "https://opencode.ai/config.json"
-        await Bun.write(configPath, JSON.stringify(parsed.data, null, 2))
+        await Bun.write(filepath, JSON.stringify(parsed.data, null, 2))
       }
-      return parsed.data
+      const data = parsed.data
+      if (data.plugin) {
+        for (let i = 0; i < data.plugin?.length; i++) {
+          const plugin = data.plugin[i]
+          try {
+            data.plugin[i] = import.meta.resolve(plugin, filepath)
+          } catch (err) {}
+        }
+      }
+      return data
     }
-    throw new InvalidError({ path: configPath, issues: parsed.error.issues })
+
+    throw new InvalidError({ path: filepath, issues: parsed.error.issues })
   }
   export const JsonError = NamedError.create(
     "ConfigJsonError",

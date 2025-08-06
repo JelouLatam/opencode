@@ -19,6 +19,7 @@ import { MessageV2 } from "../session/message-v2"
 import { Mode } from "../session/mode"
 import { callTui, TuiRoute } from "./tui"
 import { Permission } from "../permission"
+import { lazy } from "../util/lazy"
 
 const ERRORS = {
   400: {
@@ -48,7 +49,7 @@ export namespace Server {
     Connected: Bus.event("server.connected", z.object({})),
   }
 
-  function app(corsOrigins?: string[]) {
+  function createApp(corsOrigins?: string[]) {
     const app = new Hono()
 
     const result = app
@@ -1043,6 +1044,8 @@ export namespace Server {
     return result
   }
 
+  export const app = lazy(() => createApp())
+
   export async function openapi() {
     const a = app()
     const result = await generateSpecs(a, {
@@ -1059,11 +1062,12 @@ export namespace Server {
   }
 
   export function listen(opts: { port: number; hostname: string; corsOrigins?: string[] }) {
+    const appInstance = opts.corsOrigins ? createApp(opts.corsOrigins) : app()
     const server = Bun.serve({
       port: opts.port,
       hostname: opts.hostname,
       idleTimeout: 0,
-      fetch: app(opts.corsOrigins).fetch,
+      fetch: appInstance.fetch,
     })
     return server
   }

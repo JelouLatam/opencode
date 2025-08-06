@@ -3,6 +3,7 @@ import { Log } from "../util/log"
 import path from "path"
 import { z } from "zod"
 import { data } from "./models-macro" with { type: "macro" }
+import { Installation } from "../installation"
 
 export namespace ModelsDev {
   const log = Log.create({ service: "models.dev" })
@@ -60,14 +61,20 @@ export namespace ModelsDev {
 
   export async function refresh() {
     const file = Bun.file(filepath)
-    log.info("refreshing")
+    log.info("refreshing", {
+      file,
+    })
     const result = await fetch("https://models.dev/api.json", {
       headers: {
-        "User-Agent": "opencode",
+        "User-Agent": Installation.USER_AGENT,
       },
-    }).catch(() => {})
-    if (result && result.ok) await Bun.write(file, result)
+    }).catch((e) => {
+      log.error("Failed to fetch models.dev", {
+        error: e,
+      })
+    })
+    if (result && result.ok) await Bun.write(file, await result.text())
   }
 }
 
-setInterval(() => ModelsDev.refresh(), 60 * 1000).unref()
+setInterval(() => ModelsDev.refresh(), 60 * 1000 * 60).unref()

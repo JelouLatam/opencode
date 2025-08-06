@@ -1,12 +1,12 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "version": "1.0.1-cors",
+  "version": "0.3.130",
   "name": "opencode",
   "type": "module",
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "dev": "bun run ./src/index.ts"
+    "dev": "bun run --conditions=development ./src/index.ts"
   },
   "bin": {
     "opencode": "./bin/opencode"
@@ -30,15 +30,17 @@
   "dependencies": {
     "@actions/core": "1.11.1",
     "@actions/github": "6.0.1",
-    "@clack/prompts": "0.11.0",
+    "@clack/prompts": "1.0.0-alpha.1",
     "@hono/zod-validator": "0.4.2",
     "@modelcontextprotocol/sdk": "1.15.1",
     "@octokit/graphql": "9.0.1",
     "@octokit/rest": "22.0.0",
     "@openauthjs/openauth": "0.4.3",
+    "@opencode-ai/plugin": "workspace:*",
+    "@opencode-ai/sdk": "workspace:*",
     "@standard-schema/spec": "1.0.0",
     "@zip.js/zip.js": "2.7.62",
-    "ai": "5.0.0-beta.34",
+    "ai": "catalog:",
     "decimal.js": "10.5.0",
     "diff": "8.0.2",
     "gray-matter": "4.0.3",

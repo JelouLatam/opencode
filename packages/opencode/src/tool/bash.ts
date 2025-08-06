@@ -1,4 +1,6 @@
 import { z } from "zod"
+import { exec } from "child_process"
+import { text } from "stream/consumers"
 import { Tool } from "./tool"
 import DESCRIPTION from "./bash.txt"
 import { App } from "../app/app"
@@ -74,10 +76,14 @@ export const BashTool = Tool.define("bash", {
       // not an exhaustive list, but covers most common cases
       if (["cd", "rm", "cp", "mv", "mkdir", "touch", "chmod", "chown"].includes(command[0])) {
         for (const arg of command.slice(1)) {
-          if (arg.startsWith("-")) continue
-          const resolved = await $`realpath ${arg}`.text().then((x) => x.trim())
+          if (arg.startsWith("-") || (command[0] === "chmod" && arg.startsWith("+"))) continue
+          const resolved = await $`realpath ${arg}`
+            .quiet()
+            .nothrow()
+            .text()
+            .then((x) => x.trim())
           log.info("resolved path", { arg, resolved })
-          if (!Filesystem.contains(app.path.cwd, resolved)) {
+          if (resolved && !Filesystem.contains(app.path.cwd, resolved)) {
             throw new Error(
               `This command references paths outside of ${app.path.cwd} so it is not allowed to be executed.`,
             )
@@ -87,7 +93,7 @@ export const BashTool = Tool.define("bash", {
 
       // always allow cd if it passes above check
       if (!needsAsk && command[0] !== "cd") {
-        const ask = (() => {
+        const action = (() => {
           for (const [pattern, value] of Object.entries(permissions)) {
             const match = Wildcard.match(node.text, pattern)
             log.info("checking", { text: node.text.trim(), pattern, match })
@@ -95,7 +101,12 @@ export const BashTool = Tool.define("bash", {
           }
           return "ask"
         })()
-        if (ask === "ask") needsAsk = true
+        if (action === "deny") {
+          throw new Error(
+            "The user has specifically restricted access to this command, you are not allowed to execute it.",
+          )
+        }
+        if (action === "ask") needsAsk = true
       }
     }
 
@@ -112,18 +123,24 @@ export const BashTool = Tool.define("bash", {
       })
     }
 
-    const process = Bun.spawn({
-      cmd: ["bash", "-c", params.command],
+    const process = exec(params.command, {
       cwd: app.path.cwd,
-      maxBuffer: MAX_OUTPUT_LENGTH,
       signal: ctx.abort,
-      timeout: timeout,
-      stdout: "pipe",
-      stderr: "pipe",
+      maxBuffer: MAX_OUTPUT_LENGTH,
+      timeout,
     })
-    await process.exited
-    const stdout = await new Response(process.stdout).text()
-    const stderr = await new Response(process.stderr).text()
+
+    const stdoutPromise = text(process.stdout!)
+    const stderrPromise = text(process.stderr!)
+
+    await new Promise<void>((resolve) => {
+      process.on("close", () => {
+        resolve()
+      })
+    })
+
+    const stdout = await stdoutPromise
+    const stderr = await stderrPromise
 
     return {
       title: params.command,
