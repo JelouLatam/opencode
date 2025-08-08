@@ -43,5 +43,10 @@
     "protobufjs",
     "sharp"
   ],
-  "patchedDependencies": {}
+  "patchedDependencies": {},
+  "dependencies": {
+    "@opentelemetry/exporter-trace-otlp-http": "0.203.0",
+    "@opentelemetry/instrumentation-fetch": "0.203.0",
+    "@opentelemetry/sdk-node": "0.203.0"
+  }
 }
