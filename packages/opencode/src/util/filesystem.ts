@@ -1,4 +1,11 @@
-import { exists } from "fs/promises"
+import { access } from "fs/promises"
+
+async function exists(path: string): Promise<boolean> {
+  return access(path).then(
+    () => true,
+    () => false,
+  )
+}
 import { dirname, join, relative } from "path"
 
 export namespace Filesystem {
